@@ -59,7 +59,7 @@ extractMR<-function(data, names=names(data), interval=1, width=2700, by=1, limit
     extract<-names[[i]]
     dat<-data[[as.character(extract)]]
     test<-rollapply(dat$T, width=width, by=by, FUN=maxmin, align="left")
-    startstop<-issteady(test, width, limit)
+    startstop<-issteady(test, width, limit, dat)
     mrlist[[i]]$values<-dat[startstop[1]:startstop[2],]
     mrlist[[i]]$steady<-ifelse(min(test)>0.1, "no", "yes")
     mrlist[[i]]$lengthsec<-(startstop[2]-startstop[1])*2
@@ -72,13 +72,13 @@ extractMR<-function(data, names=names(data), interval=1, width=2700, by=1, limit
 # If it is, returns the indices for the time interval with the smallest temperature fluctuation
 # Otherwise, returns the indices for the longest time interval where temperature fluctions
 # are within the defined limits.
-issteady<-function(fluct, width, limit){
+issteady<-function(fluct, width, limit, dat){
     if (min(fluct) <= limit){
         a<-min(which(fluct==min(fluct)))
         b<-a + width
         startstop<-c(a, b)
     } else {
-        tempmat<-lengthwithinlimit(dat)
+        tempmat<-lengthwithinlimit(dat, limit)
         index<-which(tempmat[,3]==max(tempmat[,3]))
         startstop<-c(tempmat[index,1],tempmat[index,2])
     }
@@ -86,7 +86,7 @@ issteady<-function(fluct, width, limit){
 }
 
 # Finds the longest period where the temperature fluctuation is <=0.1
-lengthwithinlimit<-function(dat){
+lengthwithinlimit<-function(dat, limit){
   tempmat<-matrix(nrow=nrow(dat), ncol=3,
                   dimnames=list(rownames(dat),c("start","end","length")))
   start<-1
@@ -138,11 +138,34 @@ endaverage<-function(data, n){
   return(final)
 }
 
+# Calculate the slope for oxygen loss
+# Returns a dataframe with the file name and rate of oxygen loss (% per second)
+calcoxygenloss2<-function(data){
+  slope<-vector()
+  names<-vector()
+  for (i in 1:length(data)){
+    tempdat<-data[[i]][[1]]
+    mod<-lm(O2~time_s, data=tempdat)
+    slope[i]<-mod$coefficients[[2]]
+    names[i]<-names(data)[i]
+  }
+  lengthsec<-sapply(data, function(x){x$lengthsec})
+  slopesdf<-cbind.data.frame(names, slope, lengthsec)
+  return(slopesdf)
+}
+
 # Takes oxygen loss data returned by calcoxygenloss.
 # Returns a dataframe containing metabolic rate (mlO2/hour) 
 # and mass-specific metabolic rate (mlO2/hour/g).
 calcmetabolicrate<-function(oxygenloss, container=20){
-  ratehour<-with(oxygenloss, ((container-mass)*diffvec)*(1/(lengthsec/3600)))
+  ratehour<-with(oxygenloss, ((container-mass)*diffvec)*(1/(lengthsec/3600))*-1)
+  ratehourmass<-with(oxygenloss, ratehour/mass)
+  names<-oxygenloss$names
+  return(data.frame(names, ratehour, ratehourmass))
+}
+
+calcmetabolicrate2<-function(oxygenloss, container=20){
+  ratehour<-with(oxygenloss, ((container-mass)*slope/100)*-3600)
   ratehourmass<-with(oxygenloss, ratehour/mass)
   names<-oxygenloss$names
   return(data.frame(names, ratehour, ratehourmass))
